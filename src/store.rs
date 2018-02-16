@@ -29,14 +29,12 @@ use mentat_core::{
     TypedValue,
     ValueRc,
 };
+use mentat_db::db;
 use mentat_db::{
     TxObserver,
     TxReport,
 };
-
-use mentat_tolstoy::Syncer;
-
-use uuid::Uuid;
+use mentat_db::db::PartitionMapping;
 
 use conn::{
     CacheAction,
@@ -45,8 +43,7 @@ use conn::{
     InProgress,
     InProgressRead,
     Pullable,
-    Queryable,
-    Syncable
+    Queryable
 };
 
 use errors::*;
@@ -61,8 +58,8 @@ use query::{
 /// A convenience wrapper around a single SQLite connection and a Conn. This is suitable
 /// for applications that don't require complex connection management.
 pub struct Store {
+    pub sqlite: rusqlite::Connection,
     conn: Conn,
-    sqlite: rusqlite::Connection,
 }
 
 impl Store {
@@ -81,6 +78,12 @@ impl Store {
         let report = ip.transact(transaction)?;
         ip.commit()?;
         Ok(report)
+    }
+
+    pub fn fast_forward_user_partition(&mut self, new_head: Entid) -> Result<()> {
+        let mut metadata = self.conn.metadata.lock().unwrap();
+        metadata.partition_map.expand_up_to(":db.part/user", new_head);
+        db::update_partition_map(&mut self.sqlite, &metadata.partition_map).map_err(|e| e.into())
     }
 }
 
@@ -210,13 +213,6 @@ impl Pullable for Store {
     fn pull_attributes_for_entity<A>(&self, entity: Entid, attributes: A) -> Result<StructuredMap>
     where A: IntoIterator<Item=Entid> {
         self.conn.pull_attributes_for_entity(&self.sqlite, entity, attributes)
-    }
-}
-
-impl Syncable for Store {
-    fn sync(&mut self, server_uri: &String, user_uuid: &String) -> Result<()> {
-        let uuid = Uuid::parse_str(&user_uuid)?;
-        Ok(Syncer::flow(&mut self.sqlite, server_uri, &uuid)?)
     }
 }
 

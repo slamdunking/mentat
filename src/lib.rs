@@ -8,8 +8,6 @@
 // CONDITIONS OF ANY KIND, either express or implied. See the License for the
 // specific language governing permissions and limitations under the License.
 
-#![recursion_limit="128"]
-
 #[macro_use]
 extern crate failure_derive;
 extern crate failure;
@@ -114,6 +112,14 @@ pub mod query_builder;
 pub mod store;
 pub mod vocabulary;
 
+#[cfg(feature = "syncable")]
+pub mod sync;
+
+#[cfg(feature = "syncable")]
+pub use sync::{
+    Syncable,
+};
+
 pub use query::{
     IntoResult,
     PlainSymbol,
@@ -140,7 +146,6 @@ pub use conn::{
     Metadata,
     Pullable,
     Queryable,
-    Syncable,
 };
 
 pub use store::{

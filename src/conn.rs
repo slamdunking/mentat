@@ -154,7 +154,7 @@ pub struct Conn {
     /// gives us copy-on-write semantics.
     /// We store that cached `Arc` here in a `Mutex`, so that the main copy can be carefully
     /// replaced on commit.
-    metadata: Mutex<Metadata>,
+    pub metadata: Mutex<Metadata>,
 
     // TODO: maintain set of change listeners or handles to transaction report queues. #298.
 
@@ -182,10 +182,6 @@ pub trait Pullable {
           A: IntoIterator<Item=Entid>;
     fn pull_attributes_for_entity<A>(&self, entity: Entid, attributes: A) -> Result<StructuredMap>
     where A: IntoIterator<Item=Entid>;
-}
-
-pub trait Syncable {
-    fn sync(&mut self, server_uri: &String, user_uuid: &String) -> Result<()>;
 }
 
 /// Represents an in-progress, not yet committed, set of changes to the store.
@@ -570,17 +566,6 @@ pub enum CacheAction {
     Deregister,
 }
 
-impl Syncable for Store {
-    fn sync(&mut self, server_uri: &String, user_uuid: &String) -> Result<()> {
-        let uuid = Uuid::parse_str(&user_uuid)?;
-        let mut db_tx = self.sqlite.transaction()?;
-        Syncer::flow(&mut db_tx, server_uri, &uuid)?;
-        db_tx.commit()?;
-
-        Ok(())
-    }
-}
-
 impl Conn {
     // Intentionally not public.
     fn new(partition_map: PartitionMap, schema: Schema) -> Conn {
@@ -841,6 +826,8 @@ mod tests {
     use std::time::{
         Instant,
     };
+
+    use uuid::Uuid;
 
     use mentat_core::{
         CachedAttributes,

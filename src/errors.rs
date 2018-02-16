@@ -69,4 +69,7 @@ pub enum MentatError {
 
     #[fail(display = "provided value of type {} doesn't match attribute value type {}", _0, _1)]
     ValueTypeMismatch(ValueType, ValueType),
+
+    #[fail(display = "not yet implemented: {}", _0)]
+    NotYetImplemented(String),
 }
