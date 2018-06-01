@@ -15,6 +15,7 @@ use rusqlite;
 use uuid;
 
 use std::collections::BTreeSet;
+use std::path::PathBuf;
 
 use edn;
 use mentat_core::{
@@ -108,6 +109,21 @@ error_chain! {
         ValueTypeMismatch(provided: ValueType, expected: ValueType) {
             description("provided value doesn't match value type")
             display("provided value of type {} doesn't match attribute value type {}", provided, expected)
+        }
+
+        StoreNotFound(path: String) {
+            description("the Store provided does not exist or is not yet open.")
+            display("the Store at {:?} does not exist or is not yet open.", path)
+        }
+
+        StorePathMismatch(name: String, actual: PathBuf, expected: PathBuf) {
+            description("Path provided does not match expected path")
+            display("Cannot open store {:?} at path {:?} as it does not match previous store location {:?}", name, actual.to_str(), expected.to_str())
+        }
+
+        StoreConnectionStillActive(path: String) {
+            description("the Store provided has active connections and cannot be closed.")
+            display("the Store at {:?} has active connections and cannot be closed.", path)
         }
     }
 }
