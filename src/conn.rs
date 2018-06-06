@@ -570,6 +570,17 @@ pub enum CacheAction {
     Deregister,
 }
 
+impl Syncable for Store {
+    fn sync(&mut self, server_uri: &String, user_uuid: &String) -> Result<()> {
+        let uuid = Uuid::parse_str(&user_uuid)?;
+        let mut db_tx = self.sqlite.transaction()?;
+        Syncer::flow(&mut db_tx, server_uri, &uuid)?;
+        db_tx.commit()?;
+
+        Ok(())
+    }
+}
+
 impl Conn {
     // Intentionally not public.
     fn new(partition_map: PartitionMap, schema: Schema) -> Conn {
