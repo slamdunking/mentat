@@ -86,7 +86,7 @@ impl TxReceiver for TestingReceiver {
 }
 
 fn assert_tx_datoms_count(receiver: &TestingReceiver, tx_num: usize, expected_datoms: usize) {
-    let tx = receiver.txes.keys().nth(tx_num).expect("first tx");
+    let tx = receiver.txes.keys().nth(tx_num).expect(&format!("expected nth tx: {}", tx_num));
     let datoms = receiver.txes.get(tx).expect("datoms");
     assert_eq!(expected_datoms, datoms.len());
 }
@@ -97,13 +97,15 @@ fn test_reader() {
     let mut conn = Conn::connect(&mut c).expect("Couldn't open DB.");
     {
         let db_tx = c.transaction().expect("db tx");
-        // Don't inspect the bootstrap transaction, but we'd like to see it's there.
+        // Ensure that the first (bootstrap) transaction is skipped over.
         let mut receiver = TxCountingReceiver::new();
         assert_eq!(false, receiver.is_done);
         Processor::process(&db_tx, None, &mut receiver).expect("processor");
         assert_eq!(true, receiver.is_done);
-        assert_eq!(1, receiver.tx_count);
+        assert_eq!(0, receiver.tx_count);
     }
+
+    println!("transacting test schema");
 
     let ids = conn.transact(&mut c, r#"[
         [:db/add "s" :db/ident :foo/numba]
@@ -112,23 +114,40 @@ fn test_reader() {
     ]"#).expect("successful transaction").tempids;
     let numba_entity_id = ids.get("s").unwrap();
 
-    let bootstrap_tx;
+    println!("querying for test schema - expecting it to be skipped");
     {
         let db_tx = c.transaction().expect("db tx");
-        // Expect to see one more transaction of four parts (one for tx datom itself).
+        // Ensure that the user schema transaction is skipped over.
+        // TODO we only do this because we can't merge transactions yet.
+        let mut receiver = TxCountingReceiver::new();
+        assert_eq!(false, receiver.is_done);
+        Processor::process(&db_tx, None, &mut receiver).expect("processor");
+        assert_eq!(true, receiver.is_done);
+        assert_eq!(0, receiver.tx_count);
+    }
+
+    let ids = conn.transact(&mut c, r#"[
+        [:db/add "b" :foo/numba 123]
+    ]"#).expect("successful transaction").tempids;
+    let _asserted_e = ids.get("b").unwrap();
+
+    let first_tx;
+    {
+        let db_tx = c.transaction().expect("db tx");
+        // Expect to see one transaction of two parts (one for the assertion, and one for tx datom itself).
         let mut receiver = TestingReceiver::new();
         Processor::process(&db_tx, None, &mut receiver).expect("processor");
 
         println!("{:#?}", receiver);
 
-        assert_eq!(2, receiver.txes.keys().count());
-        assert_tx_datoms_count(&receiver, 1, 4);
+        assert_eq!(1, receiver.txes.keys().count());
+        assert_tx_datoms_count(&receiver, 0, 2);
 
-        bootstrap_tx = Some(*receiver.txes.keys().nth(0).expect("bootstrap tx"));
+        first_tx = Some(*receiver.txes.keys().nth(0).expect("first non-skipped tx"));
     }
 
     let ids = conn.transact(&mut c, r#"[
-        [:db/add "b" :foo/numba 123]
+        [:db/add "b" :foo/numba 666]
     ]"#).expect("successful transaction").tempids;
     let asserted_e = ids.get("b").unwrap();
 
@@ -138,20 +157,20 @@ fn test_reader() {
         // Expect to see a single two part transaction
         let mut receiver = TestingReceiver::new();
 
-        // Note that we're asking for the bootstrap tx to be skipped by the processor.
-        Processor::process(&db_tx, bootstrap_tx, &mut receiver).expect("processor");
+        // Note that we're asking for the first transacted tx to be skipped by the processor.
+        Processor::process(&db_tx, first_tx, &mut receiver).expect("processor");
 
-        assert_eq!(2, receiver.txes.keys().count());
-        assert_tx_datoms_count(&receiver, 1, 2);
+        assert_eq!(1, receiver.txes.keys().count());
+        assert_tx_datoms_count(&receiver, 0, 2);
 
         // Inspect the transaction part.
-        let tx_id = receiver.txes.keys().nth(1).expect("tx");
+        let tx_id = receiver.txes.keys().nth(0).expect("tx");
         let datoms = receiver.txes.get(tx_id).expect("datoms");
         let part = datoms.iter().find(|&part| &part.e == asserted_e).expect("to find asserted datom");
 
         assert_eq!(numba_entity_id, &part.a);
         assert!(part.v.matches_type(ValueType::Long));
-        assert_eq!(TypedValue::Long(123), part.v);
+        assert_eq!(TypedValue::Long(666), part.v);
         assert_eq!(true, part.added);
     }
 }

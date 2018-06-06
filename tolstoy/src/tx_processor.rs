@@ -130,21 +130,32 @@ impl Processor {
     pub fn process<R>(sqlite: &rusqlite::Transaction, from_tx: Option<Entid>, receiver: &mut R) -> Result<()>
     where R: TxReceiver {
         let tx_filter = match from_tx {
-            Some(tx) => format!(" WHERE tx > {} ", tx),
+            Some(tx) => format!("WHERE tx > {}", tx),
             None => format!("")
+        };
+        // If no 'from_tx' is provided, get everything but skip over the first (bootstrap) transaction.
+        let skip_first_tx = match from_tx {
+            Some(_) => false,
+            None => true
         };
         let select_query = format!("SELECT e, a, v, value_type_tag, tx, added FROM transactions {} ORDER BY tx", tx_filter);
         let mut stmt = sqlite.prepare(&select_query)?;
 
         let mut rows = stmt.query_and_then(&[], to_tx_part)?.peekable();
+
+        let mut at_tx = 1;
         let mut current_tx = None;
+
         while let Some(row) = rows.next() {
             let datom = row?;
-
             match current_tx {
                 Some(tx) => {
                     if tx != datom.tx {
+                        at_tx = at_tx + 1;
                         current_tx = Some(datom.tx);
+                        if at_tx <= 2 && skip_first_tx {
+                            continue;
+                        }
                         receiver.tx(
                             datom.tx,
                             &mut DatomsIterator::new(&datom, &mut rows)
@@ -153,6 +164,9 @@ impl Processor {
                 },
                 None => {
                     current_tx = Some(datom.tx);
+                    if at_tx <= 3 && skip_first_tx {
+                        continue;
+                    }
                     receiver.tx(
                         datom.tx,
                         &mut DatomsIterator::new(&datom, &mut rows)
