@@ -60,7 +60,6 @@ use command_parser::{
     COMMAND_HELP,
     COMMAND_IMPORT_LONG,
     COMMAND_OPEN,
-    COMMAND_OPEN_EMPTY,
     COMMAND_QUERY_LONG,
     COMMAND_QUERY_SHORT,
     COMMAND_QUERY_EXPLAIN_LONG,
@@ -78,10 +77,7 @@ use command_parser::{
 // we weren't compiled with sqlcipher), but they're unused, since we
 // omit them from help message (since they wouldn't work).
 #[cfg(feature = "sqlcipher")]
-use command_parser::{
-    COMMAND_OPEN_EMPTY_ENCRYPTED,
-    COMMAND_OPEN_ENCRYPTED,
-};
+use command_parser::COMMAND_OPEN_ENCRYPTED;
 
 use input::InputReader;
 use input::InputResult::{
@@ -100,12 +96,9 @@ lazy_static! {
             (COMMAND_EXIT_SHORT, "Shortcut for `.exit`. Close the current database and exit the REPL."),
 
             (COMMAND_OPEN, "Open a database at path."),
-            (COMMAND_OPEN_EMPTY, "Open an empty database at path."),
 
             #[cfg(feature = "sqlcipher")]
             (COMMAND_OPEN_ENCRYPTED, "Open an encrypted database at path using the provided key."),
-            #[cfg(feature = "sqlcipher")]
-            (COMMAND_OPEN_EMPTY_ENCRYPTED, "Open an empty encrypted database at path using the provided key."),
 
             (COMMAND_SCHEMA, "Output the schema for the current open database."),
 
@@ -297,21 +290,9 @@ impl Repl {
                     Err(e) => eprintln!("{}", e.to_string()),
                 };
             },
-            Command::OpenEmpty(db) => {
-                match self.open_empty(db) {
-                    Ok(_) => println!("Empty database {:?} opened", self.db_name()),
-                    Err(e) => eprintln!("{}", e.to_string()),
-                };
-            },
             Command::OpenEncrypted(db, encryption_key) => {
                 match self.open_with_key(db, &encryption_key) {
                     Ok(_) => println!("Database {:?} opened with key {:?}", self.db_name(), encryption_key),
-                    Err(e) => eprintln!("{}", e.to_string()),
-                }
-            },
-            Command::OpenEmptyEncrypted(db, encryption_key) => {
-                match self.open_empty_with_key(db, &encryption_key) {
-                    Ok(_) => println!("Empty database {:?} opened with key {:?}", self.db_name(), encryption_key),
                     Err(e) => eprintln!("{}", e.to_string()),
                 }
             },
@@ -397,7 +378,6 @@ impl Repl {
 
     fn open_common(
         &mut self,
-        empty: bool,
         path: String,
         encryption_key: Option<&str>
     ) -> ::mentat::errors::Result<()> {
@@ -407,18 +387,10 @@ impl Repl {
                 Some(_) => return Err(err_msg(".open_encrypted and .empty_encrypted require the sqlcipher Mentat feature")),
                 #[cfg(feature = "sqlcipher")]
                 Some(k) => {
-                    if empty {
-                        Store::open_empty_with_key(path.as_str(), k)?
-                    } else {
-                        Store::open_with_key(path.as_str(), k)?
-                    }
+                    Store::open_with_key(path.as_str(), k)?
                 },
                 _ => {
-                    if empty {
-                        Store::open_empty(path.as_str())?
-                    } else {
-                        Store::open(path.as_str())?
-                    }
+                    Store::open(path.as_str())?
                 }
             };
             self.path = path;
@@ -429,22 +401,12 @@ impl Repl {
     }
 
     fn open<T>(&mut self, path: T) -> ::mentat::errors::Result<()> where T: Into<String> {
-        self.open_common(false, path.into(), None)
-    }
-
-    fn open_empty<T>(&mut self, path: T)
-    -> ::mentat::errors::Result<()> where T: Into<String> {
-        self.open_common(true, path.into(), None)
+        self.open_common(path.into(), None)
     }
 
     fn open_with_key<T, U>(&mut self, path: T, encryption_key: U)
     -> ::mentat::errors::Result<()> where T: Into<String>, U: AsRef<str> {
-        self.open_common(false, path.into(), Some(encryption_key.as_ref()))
-    }
-
-    fn open_empty_with_key<T, U>(&mut self, path: T, encryption_key: U)
-    -> ::mentat::errors::Result<()> where T: Into<String>, U: AsRef<str> {
-        self.open_common(true, path.into(), Some(encryption_key.as_ref()))
+        self.open_common(path.into(), Some(encryption_key.as_ref()))
     }
 
     // Close the current store by opening a new in-memory store in its place.

@@ -14,10 +14,6 @@ use std::collections::{
     BTreeMap,
 };
 
-use std::path::{
-    Path,
-};
-
 use std::sync::{
     Arc,
 };
@@ -74,22 +70,6 @@ impl Store {
     pub fn open(path: &str) -> Result<Store> {
         let mut connection = ::new_connection(path)?;
         let conn = Conn::connect(&mut connection)?;
-        Ok(Store {
-            conn: conn,
-            sqlite: connection,
-        })
-    }
-
-    /// Returns a totally blank store with no bootstrap schema. Use `open` instead.
-    pub fn open_empty(path: &str) -> Result<Store> {
-        if !path.is_empty() {
-            if Path::new(path).exists() {
-                bail!(MentatError::PathAlreadyExists(path.to_string()));
-            }
-        }
-
-        let mut connection = ::new_connection(path)?;
-        let conn = Conn::empty(&mut connection)?;
         Ok(Store {
             conn: conn,
             sqlite: connection,
@@ -246,6 +226,11 @@ mod tests {
 
     extern crate time;
     extern crate mentat_parser_utils;
+
+    use std::path::{
+        Path,
+    };
+    use uuid::Uuid;
 
     use std::collections::{
         BTreeSet,
