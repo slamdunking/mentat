@@ -44,9 +44,7 @@ use syncer::{
     d,
 };
 
-use tx_processor::{
-    TxPart,
-};
+use types::TxPart;
 
 #[derive(Serialize,Deserialize)]
 struct SerializedHead {
@@ -110,7 +108,6 @@ impl RemoteClient {
         let uri = uri.parse()?;
 
         d(&format!("parsed uri {:?}", uri));
-
         let work = client.get(uri).and_then(|res| {
             println!("Response: {}", res.status());
 

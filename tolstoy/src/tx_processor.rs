@@ -24,14 +24,7 @@ use mentat_core::{
     TypedValue,
 };
 
-#[derive(Debug,Clone,Serialize,Deserialize)]
-pub struct TxPart {
-    pub e: Entid,
-    pub a: Entid,
-    pub v: TypedValue,
-    pub tx: Entid,
-    pub added: bool,
-}
+use types::TxPart;
 
 pub trait TxReceiver {
     fn tx<T>(&mut self, tx_id: Entid, d: &mut T) -> Result<()>
@@ -133,29 +126,21 @@ impl Processor {
             Some(tx) => format!("WHERE tx > {}", tx),
             None => format!("")
         };
-        // If no 'from_tx' is provided, get everything but skip over the first (bootstrap) transaction.
-        let skip_first_tx = match from_tx {
-            Some(_) => false,
-            None => true
-        };
         let select_query = format!("SELECT e, a, v, value_type_tag, tx, added FROM transactions {} ORDER BY tx", tx_filter);
         let mut stmt = sqlite.prepare(&select_query)?;
 
         let mut rows = stmt.query_and_then(&[], to_tx_part)?.peekable();
 
-        let mut at_tx = 1;
+        // Walk the transaction table, keeping track of the current "tx".
+        // Whenever "tx" changes, construct a datoms iterator and pass it to the receiver.
+        // NB: this logic depends on data coming out of the rows iterator to be sorted by "tx".
         let mut current_tx = None;
-
         while let Some(row) = rows.next() {
             let datom = row?;
             match current_tx {
                 Some(tx) => {
                     if tx != datom.tx {
-                        at_tx = at_tx + 1;
                         current_tx = Some(datom.tx);
-                        if at_tx <= 2 && skip_first_tx {
-                            continue;
-                        }
                         receiver.tx(
                             datom.tx,
                             &mut DatomsIterator::new(&datom, &mut rows)
@@ -164,9 +149,6 @@ impl Processor {
                 },
                 None => {
                     current_tx = Some(datom.tx);
-                    if at_tx <= 3 && skip_first_tx {
-                        continue;
-                    }
                     receiver.tx(
                         datom.tx,
                         &mut DatomsIterator::new(&datom, &mut rows)

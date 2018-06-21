@@ -827,8 +827,6 @@ mod tests {
         Instant,
     };
 
-    use uuid::Uuid;
-
     use mentat_core::{
         CachedAttributes,
         Binding,

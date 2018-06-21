@@ -35,13 +35,16 @@ extern crate uuid;
 pub mod errors;
 mod remote_client;
 
-pub mod schema;
-pub mod metadata;
-pub mod tx_processor;
+mod bootstrap;
+mod parts;
 pub mod syncer;
+pub use syncer::Syncer;
+pub mod schema;
+pub mod types;
+pub mod tx_processor;
 pub mod tx_mapper;
 pub use tx_mapper::TxMapper;
-pub use syncer::Syncer;
+pub mod metadata;
 pub use metadata::SyncMetadataClient;
 pub use errors::{
     TolstoyError,

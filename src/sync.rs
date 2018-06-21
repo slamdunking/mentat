@@ -30,9 +30,9 @@ use mentat_tolstoy::{
     TolstoyError,
 };
 use mentat_tolstoy::syncer::{
-    Tx,
     SyncResult,
 };
+use mentat_tolstoy::types::Tx;
 use mentat_tolstoy::metadata::HeadTrackable;
 
 pub trait Syncable {
@@ -127,7 +127,14 @@ impl Syncable for Store {
             SyncResult::Merge => bail!(TolstoyError::NotYetImplemented(
                 format!("Can't sync against diverged local.")
             )),
-            SyncResult::LocalFastForward(txs) => self.fast_forward_local(txs)
+            SyncResult::LocalFastForward(txs) => self.fast_forward_local(txs),
+            SyncResult::BadServerState => bail!(TolstoyError::NotYetImplemented(
+                format!("Bad server state.")
+            )),
+            SyncResult::AdoptedRemoteOnFirstSync => Ok(()),
+            SyncResult::IncompatibleBootstrapSchema => bail!(TolstoyError::NotYetImplemented(
+                format!("IncompatibleBootstrapSchema.")
+            )),
         }
     }
 }
