@@ -15,6 +15,11 @@ use errors::{
     Result,
 };
 
+use conn::{
+    InProgress,
+    Syncable as SyncableInProgress
+};
+use entity_builder::TermBuilder;
 use mentat_core::{
     Entid,
     KnownEntid,
@@ -37,15 +42,18 @@ use mentat_tolstoy::metadata::HeadTrackable;
 
 pub trait Syncable {
     fn sync(&mut self, server_uri: &String, user_uuid: &String) -> Result<()>;
-    fn fast_forward_local(&mut self, txs: Vec<Tx>) -> Result<()>;
 }
 
 fn within_user_partition(entid: Entid) -> bool {
     entid >= db::USER0 && entid < db::TX0
 }
 
-impl Syncable for Store {
-    fn fast_forward_local(&mut self, txs: Vec<Tx>) -> Result<()> {
+impl<'a, 'c> SyncableInProgress for InProgress<'a, 'c> {
+    fn flow(&mut self, server_uri: &String, user_uuid: &Uuid) -> Result<SyncResult> {
+        Syncer::flow(&mut self.transaction, server_uri, user_uuid)
+    }
+
+    fn fast_forward_local(&mut self, txs: Vec<Tx>) -> Result<Entid> {
         let mut last_tx_entid = None;
         let mut last_tx_uuid = None;
 
@@ -62,8 +70,7 @@ impl Syncable for Store {
         let mut largest_endid_encountered = db::USER0;
 
         for tx in txs {
-            let in_progress = self.begin_transaction()?;
-            let mut builder = in_progress.builder();
+            let mut builder = TermBuilder::new();
             for part in tx.parts {
                 if part.added {
                     builder.add(KnownEntid(part.e), KnownEntid(part.a), part.v.clone())?;
@@ -75,7 +82,7 @@ impl Syncable for Store {
                     largest_endid_encountered = part.e;
                 }
             }
-            let report = builder.commit()?;
+            let report = self.transact_builder(builder)?;
             last_tx_entid = Some(report.tx_id);
             last_tx_uuid = Some(tx.tx.clone());
         }
@@ -85,56 +92,54 @@ impl Syncable for Store {
         // "locally known remote head".
         if let Some(uuid) = last_tx_uuid {
             if let Some(entid) = last_tx_entid {
-                {
-                let mut db_tx = self.sqlite.transaction()?;
-                SyncMetadataClient::set_remote_head(&mut db_tx, &uuid)?;
-                TxMapper::set_tx_uuid(&mut db_tx, entid, &uuid)?;
-                db_tx.commit()?;
-                }
-
-                // only need to advance the user partition, since we're using KnownEntid and partition won't
-                // get auto-updated; shouldn't be a problem for tx partition, since we're relying on the builder
-                // to create a tx and advance the partition for us.
-                self.fast_forward_user_partition(largest_endid_encountered)?;
+                SyncMetadataClient::set_remote_head(&mut self.transaction, &uuid)?;
+                TxMapper::set_tx_uuid(&mut self.transaction, entid, &uuid)?;
             }
         }
 
-        Ok(())
+        Ok(largest_endid_encountered)
     }
+}
 
+impl Syncable for Store {
     fn sync(&mut self, server_uri: &String, user_uuid: &String) -> Result<()> {
         let uuid = Uuid::parse_str(&user_uuid)?;
 
-        let sync_result;
+        let mut largest_endid_encountered = None;
         {
-            let mut db_tx = self.sqlite.transaction()?;
-            sync_result = Syncer::flow(&mut db_tx, server_uri, &uuid)?;
+            let mut in_progress = self.begin_transaction()?;
+            let sync_result = in_progress.flow(server_uri, &uuid)?;
 
-            // TODO this should be done _after_ all of the operations below conclude!
-            // Commits any changes Syncer made (schema, updated heads, tu mappings during an upload, etc)
-            db_tx.commit()?;
+            match sync_result {
+                SyncResult::Merge => bail!(TolstoyError::NotYetImplemented(
+                    format!("Can't sync against diverged local.")
+                )),
+                SyncResult::LocalFastForward(txs) => {
+                    largest_endid_encountered = Some(in_progress.fast_forward_local(txs)?);
+                },
+                SyncResult::BadServerState => bail!(TolstoyError::NotYetImplemented(
+                    format!("Bad server state.")
+                )),
+                SyncResult::IncompatibleBootstrapSchema => bail!(TolstoyError::NotYetImplemented(
+                    format!("IncompatibleBootstrapSchema.")
+                )),
+                _ => ()
+            }
+
+            // All of the work we've done while syncing is committed at this point.
+            in_progress.commit()?;
         }
 
-        // TODO These operations need to borrow self as mutable; but we already borrow it for db_tx above,
-        // and so for now we split up sync into multiple db transactions /o\
-        // Fixing this likely involves either implementing flow on InProgress, or changing flow to
-        // take an InProgress instead of a raw sql transaction.
+        // See https://github.com/mozilla/mentat/pull/494 for "renumbering" work which is a generalized take on this.
 
-        match sync_result {
-            SyncResult::EmptyServer => Ok(()),
-            SyncResult::NoChanges => Ok(()),
-            SyncResult::ServerFastForward => Ok(()),
-            SyncResult::Merge => bail!(TolstoyError::NotYetImplemented(
-                format!("Can't sync against diverged local.")
-            )),
-            SyncResult::LocalFastForward(txs) => self.fast_forward_local(txs),
-            SyncResult::BadServerState => bail!(TolstoyError::NotYetImplemented(
-                format!("Bad server state.")
-            )),
-            SyncResult::AdoptedRemoteOnFirstSync => Ok(()),
-            SyncResult::IncompatibleBootstrapSchema => bail!(TolstoyError::NotYetImplemented(
-                format!("IncompatibleBootstrapSchema.")
-            )),
+        // Only need to advance the user partition, since we're using KnownEntid and partition won't
+        // get auto-updated; shouldn't be a problem for tx partition, since we're relying on the builder
+        // to create a tx and advance the partition for us.
+        match largest_endid_encountered {
+            Some(v) => self.fast_forward_user_partition(v)?,
+            None => ()
         }
+
+        Ok(())
     }
 }

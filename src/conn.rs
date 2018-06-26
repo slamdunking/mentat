@@ -42,6 +42,8 @@ use rusqlite::{
 
 use edn;
 
+use uuid::Uuid;
+
 use mentat_core::{
     Attribute,
     Entid,
@@ -97,6 +99,14 @@ use errors::{
     Result,
     MentatError,
 };
+
+#[cfg(feature = "syncable")]
+use mentat_tolstoy::syncer::{
+    SyncResult,
+};
+
+#[cfg(feature = "syncable")]
+use mentat_tolstoy::types::Tx;
 
 use query::{
     Known,
@@ -189,7 +199,7 @@ pub trait Pullable {
 /// A transaction is held open until you do so.
 /// Your changes will be implicitly dropped along with this struct.
 pub struct InProgress<'a, 'c> {
-    transaction: rusqlite::Transaction<'c>,
+    pub(crate) transaction: rusqlite::Transaction<'c>,
     mutex: &'a Mutex<Metadata>,
     generation: u64,
     partition_map: PartitionMap,
@@ -198,6 +208,12 @@ pub struct InProgress<'a, 'c> {
     use_caching: bool,
     tx_observer: &'a Mutex<TxObservationService>,
     tx_observer_watcher: InProgressObserverTransactWatcher,
+}
+
+#[cfg(feature = "syncable")]
+pub trait Syncable {
+    fn flow(&mut self, server_uri: &String, user_uuid: &Uuid) -> Result<SyncResult>;
+    fn fast_forward_local(&mut self, txs: Vec<Tx>) -> Result<Entid>;
 }
 
 /// Represents an in-progress set of reads to the store. Just like `InProgress`,
